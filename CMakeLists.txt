@@ -103,6 +103,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(sony_head_tracker_linux_tests
         tests/test_main.cpp
         tests/report_descriptor_tests.cpp
+        tests/linux_support_tests.cpp
     )
     target_link_libraries(sony_head_tracker_linux_tests PRIVATE sony_head_tracker_core)
     sht_apply_macos_hardening(sony_head_tracker_linux_tests)
