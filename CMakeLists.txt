@@ -24,6 +24,7 @@ add_library(sony_head_tracker_core STATIC
     src/orientation.cpp
     src/protocol.cpp
     src/hid_descriptor.cpp
+    src/hid_report_descriptor.cpp
     src/app_config.cpp
     src/diagnostics.cpp
 )
@@ -96,4 +97,14 @@ if(APPLE)
     sht_apply_macos_hardening(sony_head_tracker_tests)
     sht_apply_macos_hardening(sony_head_tracker_c_api_tests)
     add_test(NAME c-api COMMAND sony_head_tracker_c_api_tests)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(sony_head_tracker_linux_tests
+        tests/test_main.cpp
+        tests/report_descriptor_tests.cpp
+    )
+    target_link_libraries(sony_head_tracker_linux_tests PRIVATE sony_head_tracker_core)
+    sht_apply_macos_hardening(sony_head_tracker_linux_tests)
+    add_test(NAME linux COMMAND sony_head_tracker_linux_tests)
 endif()
