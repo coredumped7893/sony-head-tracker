@@ -6,10 +6,13 @@
 #include "sony_head_tracker/device.hpp"
 #include "sony_head_tracker/hid_report_descriptor.hpp"
 #include "sony_head_tracker/hid_usages.hpp"
+#include "sony_head_tracker/macos_support.hpp"
+#include "sony_head_tracker/types.hpp"
 
 #include <algorithm>
 #include <charconv>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -17,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace sony {
 
@@ -167,6 +171,106 @@ inline DeviceInfo describeHidrawDevice(std::wstring path, std::wstring instanceI
     device.sensorDescription = std::move(sensorDescription);
     device.accessDenied = accessDenied;
     return device;
+}
+
+struct FeatureAssignment {
+    std::uint8_t reportId{};
+    std::size_t bitOffset{};
+    std::size_t bitSize{};
+    std::uint64_t value{};
+};
+
+// Power Full, Reporting All Events and the report interval, as bit-level writes.
+// Selector fields are arrays: the value written is logicalMin + the usage's index.
+inline std::optional<std::vector<FeatureAssignment>> planFeatureConfiguration(
+    std::span<const DescriptorField> fields, std::int64_t reportIntervalRaw) {
+    std::vector<FeatureAssignment> plan;
+    const auto add = [&](std::uint16_t usage, bool selector, std::int64_t raw) {
+        const auto field = std::find_if(fields.begin(), fields.end(), [&](const auto& candidate) {
+            return candidate.feature && candidate.usagePage == kSensorPage && candidate.usage == usage &&
+                   candidate.isArray == selector;
+        });
+        if (field == fields.end() || field->bitSize == 0 || field->bitSize > 64) return false;
+        if (selector) raw = field->logicalMin + field->arrayIndex;
+        if (raw < field->logicalMin || raw > field->logicalMax) return false;
+        plan.push_back({field->reportId, field->bitOffset, field->bitSize, static_cast<std::uint64_t>(raw)});
+        return true;
+    };
+    if (!add(kPowerFull, true, 0) || !add(kReportingAllEvents, true, 0) ||
+        !add(kReportInterval, false, reportIntervalRaw)) {
+        return std::nullopt;
+    }
+    return plan;
+}
+
+// Decodes one hidraw input report. Numbered reports arrive with the report ID
+// as the first byte. packetsPerSecond and receivedAt are left to the caller.
+inline std::optional<MotionSample> decodeMotionSample(
+    std::span<const std::uint8_t> report, std::span<const DescriptorField> fields) {
+    const bool prefixed = std::any_of(fields.begin(), fields.end(), [](const auto& field) {
+        return !field.feature && field.reportId != 0;
+    });
+    if (prefixed && report.empty()) return std::nullopt;
+    const auto reportId = prefixed ? report[0] : std::uint8_t{};
+    const FeatureReportLayout layout{reportId, prefixed};
+
+    MotionSample sample;
+    Vec3 gyro{};
+    Vec3 accel{};
+    bool gotRotation{};
+    bool gotGyro{};
+    bool gotAccel{};
+    for (const auto& field : fields) {
+        if (field.feature || field.constant || field.usagePage != kSensorPage || field.reportId != reportId) continue;
+        const auto raw = [&](std::size_t index) -> std::optional<std::int64_t> {
+            const auto bits = readFeatureBits(report, layout, field.bitOffset + index * field.bitSize, field.bitSize);
+            if (!bits) return std::nullopt;
+            auto value = static_cast<std::int64_t>(*bits);
+            if (field.logicalMin < 0 && field.bitSize < 64 && ((*bits >> (field.bitSize - 1)) & 1u)) {
+                value -= std::int64_t{1} << field.bitSize;
+            }
+            return value;
+        };
+        const auto scaled = [&](std::size_t index) -> std::optional<double> {
+            const auto value = raw(index);
+            if (!value) return std::nullopt;
+            return descriptorScale(*value, field.logicalMin, field.logicalMax, field.physicalMin,
+                                   field.physicalMax, field.unitExponent);
+        };
+        const auto readVector = [&](Vec3& out) {
+            if (field.reportCount < 3) return false;
+            const auto x = scaled(0);
+            const auto y = scaled(1);
+            const auto z = scaled(2);
+            if (!x || !y || !z) return false;
+            out = {*x, *y, *z};
+            return true;
+        };
+        const auto scalar = [&](Vec3& out, std::uint16_t first) {
+            const auto value = scaled(0);
+            if (!value) return false;
+            out[field.usage - first] = *value;
+            return true;
+        };
+        const auto usage = field.usage;
+        if (usage == kRotation) {
+            gotRotation = readVector(sample.rotationVector);
+        } else if (usage == kAngularVelocity || usage == kAngularVelocityVector) {
+            gotGyro = readVector(gyro);
+        } else if (usage == kAccelerationVector) {
+            gotAccel = readVector(accel);
+        } else if (usage >= kAngularVelocityX && usage <= kAngularVelocityZ) {
+            gotGyro = scalar(gyro, kAngularVelocityX) || gotGyro;
+        } else if (usage >= kAccelerationX && usage <= kAccelerationZ) {
+            gotAccel = scalar(accel, kAccelerationX) || gotAccel;
+        } else if (usage == kResetCounter) {
+            if (const auto counter = raw(0)) sample.resetCounter = static_cast<std::uint8_t>(*counter);
+        }
+    }
+    if (!gotRotation) return std::nullopt;
+    if (gotGyro) sample.angularVelocity = gyro;
+    if (gotAccel) sample.acceleration = accel;
+    return sample;
 }
 
 } // namespace sony

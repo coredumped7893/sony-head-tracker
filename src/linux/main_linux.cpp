@@ -1,6 +1,6 @@
 // main_linux.cpp
-// Linux CLI. Currently probes hidraw nodes for the Android Head Tracker; dump
-// and bridge are added in the following port tasks.
+// Linux CLI. Probes hidraw nodes for the Android Head Tracker and dumps its raw
+// and decoded input reports; bridge is added in a following port task.
 #include "sony_head_tracker/device.hpp"
 #include "sony_head_tracker/hid_backend.hpp"
 #include "sony_head_tracker/macos_support.hpp"
@@ -8,17 +8,21 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <csignal>
+#include <cstdlib>
 #include <format>
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
 
 constexpr int kExitNoPermission = 77; // EX_NOPERM, sysexits.h
 constexpr int kExitNotFound = 2;
+constexpr int kExitConnectFailed = 3;
 
 std::atomic_bool stopRequested{};
 std::atomic_bool recenterRequested{};
@@ -75,6 +79,31 @@ std::vector<sony::DeviceInfo>::const_iterator verifiedDevice(
                         [](const auto& device) { return sony::isVerifiedAndroidTracker(device); });
 }
 
+unsigned parseUnsigned(std::string_view text) {
+    const std::string value(text);
+    char* end = nullptr;
+    const auto parsed = std::strtoul(value.c_str(), &end, 10);
+    return end == value.c_str() || *end != '\0' ? 0 : static_cast<unsigned>(parsed);
+}
+
+bool deadlineReached(std::chrono::steady_clock::time_point deadline, unsigned seconds) {
+    return seconds != 0 && std::chrono::steady_clock::now() >= deadline;
+}
+
+int reportNoTracker(const std::vector<sony::DeviceInfo>& devices, std::wostream& out) {
+    const auto denied = std::find_if(devices.begin(), devices.end(),
+                                     [](const auto& device) { return device.accessDenied; });
+    if (denied != devices.end()) {
+        out << std::format(
+            L"\nAndroid Head Tracker candidate found at {}, but access was denied. "
+            L"Install the udev rule (see docs/LINUX.md), then reconnect the headset.\n",
+            denied->path);
+        return kExitNoPermission;
+    }
+    out << L"\nNo verified Android Head Tracker HID sensor was found.\n";
+    return kExitNotFound;
+}
+
 int runProbe() {
     sony::HidBackend hid;
     const auto devices = hid.enumerate();
@@ -83,17 +112,50 @@ int runProbe() {
         std::wcout << L"\nVerified Android head tracker found.\n";
         return 0;
     }
-    const auto denied = std::find_if(devices.begin(), devices.end(),
-                                     [](const auto& device) { return device.accessDenied; });
-    if (denied != devices.end()) {
-        std::wcout << std::format(
-            L"\nAndroid Head Tracker candidate found at {}, but access was denied. "
-            L"Install the udev rule (see docs/LINUX.md), then reconnect the headset.\n",
-            denied->path);
-        return kExitNoPermission;
+    return reportNoTracker(devices, std::wcout);
+}
+
+int runDump(int argc, char** argv) {
+    unsigned seconds{};
+    for (int index = 2; index < argc; ++index) {
+        const std::string_view option = argv[index];
+        if (option == "--seconds" && index + 1 < argc) {
+            seconds = parseUnsigned(argv[++index]);
+        } else {
+            std::wcerr << L"Invalid dump option. Use 'help'.\n";
+            return 1;
+        }
     }
-    std::wcout << L"\nNo verified Android Head Tracker HID sensor was found.\n";
-    return kExitNotFound;
+    sony::HidBackend hid;
+    const auto devices = hid.enumerate();
+    const auto selected = verifiedDevice(devices);
+    if (selected == devices.end()) return reportNoTracker(devices, std::wcerr);
+    for (const auto& device : devices) printDevice(device);
+    if (!hid.connect(
+            *selected,
+            [](const auto& bytes) { std::wcout << sony::hexDump(bytes) << L'\n'; },
+            [](sony::MotionSample sample) {
+                std::wcout << std::format(
+                    L"SAMPLE rotation=({:.6f},{:.6f},{:.6f}) rate={:.1f}pps",
+                    sample.rotationVector.x, sample.rotationVector.y,
+                    sample.rotationVector.z, sample.packetsPerSecond);
+                if (sample.angularVelocity) {
+                    std::wcout << std::format(
+                        L" gyro=({:.6f},{:.6f},{:.6f})",
+                        sample.angularVelocity->x, sample.angularVelocity->y,
+                        sample.angularVelocity->z);
+                }
+                std::wcout << L'\n';
+            })) {
+        std::wcerr << L"Could not connect/configure the verified Android head tracker.\n";
+        return kExitConnectFailed;
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
+    while (!stopRequested && !deadlineReached(deadline, seconds) && hid.connected()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    hid.disconnect();
+    return 0;
 }
 
 } // namespace
@@ -110,7 +172,8 @@ int main(int argc, char** argv) {
     }
     installSignals();
     if (command == "probe") return runProbe();
-    if (command == "dump" || command == "bridge") {
+    if (command == "dump") return runDump(argc, argv);
+    if (command == "bridge") {
         std::wcerr << L"'" << std::wstring(command.begin(), command.end()) << L"' is not implemented yet.\n";
         return 1;
     }

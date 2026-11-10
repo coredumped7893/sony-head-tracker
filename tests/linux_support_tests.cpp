@@ -242,3 +242,134 @@ TEST(access_denied_candidate_is_flagged_and_unverified) {
     CHECK(device.accessDenied);
     CHECK(!isVerifiedAndroidTracker(device));
 }
+
+namespace {
+
+std::vector<DescriptorField> ultWearFields() { return ultWearDescriptor().fields; }
+
+std::vector<std::uint8_t> ultWearReport() {
+    return {0x01, 0x00, 0x40, 0x00, 0x00, 0x00, 0xC0, 0xFF, 0x7F, 0x00, 0x00, 0x01, 0x80, 0x07};
+}
+
+} // namespace
+
+TEST(feature_plan_on_ult_wear_sets_power_reporting_and_interval) {
+    const auto fields = ultWearFields();
+    const auto plan = planFeatureConfiguration(fields, 1);
+    CHECK(plan.has_value());
+    if (!plan) return;
+    CHECK(plan->size() == 3);
+    if (plan->size() != 3) return;
+    std::vector<std::uint8_t> report{0x01, 0x00};
+    const FeatureReportLayout layout{1, true};
+    for (const auto& item : *plan) {
+        CHECK(item.reportId == 1);
+        CHECK(writeFeatureBits(report, layout, item.bitOffset, item.bitSize, item.value));
+    }
+    CHECK(report == (std::vector<std::uint8_t>{0x01, 0x07}));
+    const auto at = [&](std::size_t offset) {
+        return std::find_if(plan->begin(), plan->end(), [&](const auto& item) { return item.bitOffset == offset; });
+    };
+    CHECK(at(0) != plan->end() && at(0)->bitSize == 1 && at(0)->value == 1);
+    CHECK(at(1) != plan->end() && at(1)->bitSize == 1 && at(1)->value == 1);
+    CHECK(at(2) != plan->end() && at(2)->bitSize == 6 && at(2)->value == 1);
+}
+
+TEST(feature_plan_selector_value_is_logical_min_plus_array_index) {
+    auto fields = ultWearFields();
+    for (auto& field : fields) {
+        if (field.feature && field.isArray) field.logicalMin = 1, field.logicalMax = 2;
+    }
+    const auto plan = planFeatureConfiguration(fields, 1);
+    CHECK(plan.has_value());
+    if (!plan || plan->size() != 3) return;
+    CHECK((*plan)[0].value == 2);
+    CHECK((*plan)[1].value == 2);
+}
+
+TEST(feature_plan_rejects_missing_field_bad_size_and_out_of_range_value) {
+    const auto fields = ultWearFields();
+    for (const auto missing : {kPowerFull, kReportingAllEvents, kReportInterval}) {
+        auto trimmed = fields;
+        std::erase_if(trimmed, [&](const auto& field) { return field.feature && field.usage == missing; });
+        CHECK(!planFeatureConfiguration(trimmed, 1).has_value());
+    }
+    CHECK(!planFeatureConfiguration(fields, 64).has_value());
+    CHECK(!planFeatureConfiguration(fields, -1).has_value());
+    for (const auto size : {0, 65}) {
+        auto bad = fields;
+        for (auto& field : bad) {
+            if (field.feature && field.usage == kReportInterval) field.bitSize = static_cast<std::uint16_t>(size);
+        }
+        CHECK(!planFeatureConfiguration(bad, 1).has_value());
+    }
+    CHECK(!planFeatureConfiguration({}, 1).has_value());
+}
+
+TEST(decode_ult_wear_report_scales_rotation_gyro_and_counter) {
+    const auto fields = ultWearFields();
+    const auto sample = decodeMotionSample(ultWearReport(), fields);
+    CHECK(sample.has_value());
+    if (!sample) return;
+    CHECK_NEAR(sample->rotationVector.x, descriptorScale(16384, -32767, 32767, -314159264, 314159265, -8), 1e-9);
+    CHECK_NEAR(sample->rotationVector.x, 1.57094, 1e-4);
+    CHECK_NEAR(sample->rotationVector.y, 0.0, 1e-7);
+    CHECK_NEAR(sample->rotationVector.z, -sample->rotationVector.x, 1e-4);
+    CHECK(sample->angularVelocity.has_value());
+    if (sample->angularVelocity) {
+        CHECK_NEAR(sample->angularVelocity->x, 32.0, 1e-9);
+        CHECK_NEAR(sample->angularVelocity->z, -32.0, 1e-9);
+    }
+    CHECK(!sample->acceleration.has_value());
+    CHECK(sample->resetCounter == 7);
+}
+
+TEST(decode_rejects_wrong_id_truncated_and_empty_reports) {
+    const auto fields = ultWearFields();
+    auto wrongId = ultWearReport();
+    wrongId[0] = 0x02;
+    CHECK(!decodeMotionSample(wrongId, fields).has_value());
+    const auto report = ultWearReport();
+    CHECK(!decodeMotionSample(std::span(report).first(5), fields).has_value());
+    CHECK(!decodeMotionSample(std::span<const std::uint8_t>{}, fields).has_value());
+    CHECK(!decodeMotionSample(std::span(report).first(1), fields).has_value());
+}
+
+TEST(decode_truncated_after_rotation_drops_gyro_but_keeps_sample) {
+    const auto fields = ultWearFields();
+    const auto report = ultWearReport();
+    const auto sample = decodeMotionSample(std::span(report).first(10), fields);
+    CHECK(sample.has_value());
+    if (sample) CHECK(!sample->angularVelocity.has_value());
+}
+
+TEST(decode_unnumbered_report_with_scalar_gyro_and_acceleration) {
+    const auto field = [](std::uint16_t usage, std::uint32_t bitOffset, std::uint16_t count) {
+        DescriptorField item;
+        item.usagePage = kSensorPage;
+        item.usage = usage;
+        item.reportCount = count;
+        item.bitSize = 8;
+        item.logicalMin = -127;
+        item.logicalMax = 127;
+        item.physicalMin = -127;
+        item.physicalMax = 127;
+        item.bitOffset = bitOffset;
+        return item;
+    };
+    const std::vector<DescriptorField> fields{
+        field(kRotation, 0, 3), field(kAngularVelocityX, 24, 1), field(kAngularVelocityY, 32, 1),
+        field(kAccelerationX, 40, 1)};
+    const std::vector<std::uint8_t> report{1, 2, 3, 0x0A, 0xF6, 0x05};
+    const auto sample = decodeMotionSample(report, fields);
+    CHECK(sample.has_value());
+    if (!sample) return;
+    CHECK_NEAR(sample->rotationVector.z, 3.0, 1e-9);
+    CHECK(sample->angularVelocity.has_value());
+    if (sample->angularVelocity) {
+        CHECK_NEAR(sample->angularVelocity->x, 10.0, 1e-9);
+        CHECK_NEAR(sample->angularVelocity->y, -10.0, 1e-9);
+    }
+    CHECK(sample->acceleration.has_value());
+    if (sample->acceleration) CHECK_NEAR(sample->acceleration->x, 5.0, 1e-9);
+}
