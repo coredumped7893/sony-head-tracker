@@ -100,12 +100,22 @@ if(APPLE)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_library(sony_head_tracker_linux_platform STATIC
+        src/linux/bluetooth_recovery_linux.cpp
+        src/linux/logger_linux.cpp
+        src/linux/output_udp_linux.cpp
+        src/linux/private_file_linux.cpp
+    )
+    target_link_libraries(sony_head_tracker_linux_platform PUBLIC sony_head_tracker_core)
+    sht_apply_macos_hardening(sony_head_tracker_linux_platform)
+
     add_executable(sony_head_tracker_linux_tests
         tests/test_main.cpp
         tests/report_descriptor_tests.cpp
         tests/linux_support_tests.cpp
+        tests/linux_platform_tests.cpp
     )
-    target_link_libraries(sony_head_tracker_linux_tests PRIVATE sony_head_tracker_core)
+    target_link_libraries(sony_head_tracker_linux_tests PRIVATE sony_head_tracker_linux_platform)
     sht_apply_macos_hardening(sony_head_tracker_linux_tests)
     add_test(NAME linux COMMAND sony_head_tracker_linux_tests)
 endif()
