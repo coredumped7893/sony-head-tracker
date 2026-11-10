@@ -1,0 +1,4 @@
+# Grants the logged-in seat user access to Bluetooth (bus 0005) Sony HID nodes
+# (vendor 054C), so sony-head-tracker-linux can read the headset's hidraw device
+# without root. The bus is pinned so USB Sony devices are not touched.
+SUBSYSTEM=="hidraw", KERNELS=="0005:054C:*", TAG+="uaccess"
