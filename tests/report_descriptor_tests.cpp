@@ -338,3 +338,27 @@ TEST(logical_maximum_signedness_follows_the_minimum) {
     CHECK(parsed->fields[1].logicalMin == -128);
     CHECK(parsed->fields[1].logicalMax == 127);
 }
+
+namespace {
+
+// Report Size 0 keeps the bit counter at zero, so only the field budget can stop the expansion.
+Bytes zeroSizeInputItems(std::size_t items) {
+    Bytes body{0x75, 0x00, 0x96, 0x00, 0x30};
+    for (std::size_t i = 0; i < items; ++i) {
+        body.insert(body.end(), {0x1a, 0x00, 0x00, 0x2a, 0xff, 0x2f, 0x81, 0x00});
+    }
+    return wrapped(body);
+}
+
+} // namespace
+
+TEST(field_budget_rejects_zero_size_usage_range_expansion) {
+    CHECK(rejected(zeroSizeInputItems(510)));
+}
+
+TEST(field_budget_boundary_between_five_and_six_full_usage_ranges) {
+    const auto five = parseReportDescriptor(zeroSizeInputItems(5));
+    CHECK(five.has_value());
+    if (five) CHECK(five->fields.size() == 5 * 12288);
+    CHECK(rejected(zeroSizeInputItems(6)));
+}

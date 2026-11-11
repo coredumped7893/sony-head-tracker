@@ -17,6 +17,8 @@ constexpr std::size_t kMaxDescriptorBytes = 4096;
 constexpr std::size_t kMaxUsages = 12288;
 constexpr std::uint32_t kMaxReportBytes = 16384;
 constexpr std::size_t kMaxGlobalStack = 16;
+// Parser's own budget, not a kernel limit: Report Size 0 lets usage ranges expand without growing any report.
+constexpr std::size_t kMaxFields = 65536;
 constexpr std::uint32_t kMaxReportSizeBits = 256;
 
 enum ReportType : std::size_t { kInput, kOutput, kFeature };
@@ -162,10 +164,10 @@ struct Parser {
                 out.fields.push_back(f);
             }
         }
-        return true;
+        return out.fields.size() <= kMaxFields;
     }
 
-    bool collection(std::uint32_t type) {
+    void collection(std::uint32_t type) {
         if (depth == 0 && type == 0x01 && !foundApplication) {
             foundApplication = true;
             if (!usages.empty()) {
@@ -174,7 +176,6 @@ struct Parser {
             }
         }
         ++depth;
-        return true;
     }
 
     bool main(unsigned tag, std::uint32_t value) {
@@ -183,7 +184,7 @@ struct Parser {
         case 0x8: ok = data(kInput, value); break;
         case 0x9: ok = data(kOutput, value); break;
         case 0xB: ok = data(kFeature, value); break;
-        case 0xA: ok = collection(value); break;
+        case 0xA: collection(value); break;
         case 0xC:
             if (depth == 0) return false;
             --depth;
