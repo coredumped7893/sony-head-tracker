@@ -6,15 +6,15 @@ the same platform-independent descriptor parser, orientation filter,
 recentering, axis mapping, and UDP serializers as the Windows and macOS builds.
 
 This is an unofficial project and is not affiliated with or endorsed by Sony.
-Linux has a command-line bridge only; there is no GUI yet. Only the Sony ULT WEAR
-(WH-ULT900N) has been tested. XM5, XM6, and other models should work if they
-expose the same protocol, but that is unconfirmed on Linux.
+Linux has a command-line bridge only; there is no GUI yet. Tested on the Sony ULT
+WEAR (WH-ULT900N) only; compatibility reports for other models are welcome.
 
 ## Requirements
 
 - CMake 3.25 or later and a C++20 compiler (verified with GCC 15.2 and Clang
   21);
-- `libsystemd-dev` (`systemd-devel` on Fedora) and `pkg-config`;
+- `libsystemd-dev` (`systemd-devel` on Fedora) and `pkg-config`, with
+  libsystemd 246 or later;
 - glibc 2.36 or later (the build uses `arc4random_buf`);
 - BlueZ on a systemd-based distribution;
 - a paired compatible headset with current firmware.
@@ -52,18 +52,26 @@ Fix, in this order:
    `ControllerMode = bredr`.
 3. Restart Bluetooth: `sudo systemctl restart bluetooth`
 4. Remove the headset, then pair, trust, and connect it again, using your
-   headset's address in place of the placeholder:
+   headset's address in place of the placeholder. Put the headset in pairing
+   mode, then use one interactive `bluetoothctl` session so scanning stays on
+   until pairing finishes. After `scan on`, wait until the headset's address
+   appears in the output before you run `pair`:
 
-   ```bash
-   bluetoothctl remove XX:XX:XX:XX:XX:XX
-   bluetoothctl scan on      # put the headset in pairing mode
-   bluetoothctl pair XX:XX:XX:XX:XX:XX
-   bluetoothctl trust XX:XX:XX:XX:XX:XX
-   bluetoothctl connect XX:XX:XX:XX:XX:XX
+   ```text
+   $ bluetoothctl
+   [bluetooth]# remove XX:XX:XX:XX:XX:XX
+   [bluetooth]# scan on
+   [bluetooth]# pair XX:XX:XX:XX:XX:XX
+   [bluetooth]# trust XX:XX:XX:XX:XX:XX
+   [bluetooth]# connect XX:XX:XX:XX:XX:XX
+   [bluetooth]# scan off
+   [bluetooth]# quit
    ```
 
-5. Restore the original `ControllerMode` (for example from
-   `main.conf.bak`) and restart Bluetooth again.
+5. Restore the original configuration and restart Bluetooth again:
+   `sudo cp /etc/bluetooth/main.conf.bak /etc/bluetooth/main.conf`, then
+   `sudo systemctl restart bluetooth`. Restarting Bluetooth drops all Bluetooth
+   connections, including audio.
 
 The Classic bond survives the revert and later power cycles. While
 `ControllerMode = bredr` is active, Bluetooth LE devices are unavailable, so keep
@@ -125,8 +133,12 @@ a candidate exists but access was denied.
 The binary OpenTrack packet is the same six little-endian doubles
 `(x, y, z, yaw, pitch, roll)` as on the other platforms, with translation set to
 zero. The default axis mapping and smoothing are the same as on Windows and
-macOS. Bridge exit codes: `0` normal stop, `1` invalid option, `3` no tracker
-found at start, `4` UDP output could not be opened, `77` access denied at start.
+macOS. Bridge exit codes: `0` normal stop, `1` invalid option, `4` UDP output
+could not be opened. `3` (no verified tracker found) and `77` (access denied)
+are returned at start only on the first run, before a headset address has been
+stored. Once a tracker has been found, its address is stored and the bridge
+enters the reconnect backoff instead, even if this first connect fails. It keeps
+retrying (see [Recovery](#recovery)).
 
 While the bridge runs:
 
@@ -164,17 +176,24 @@ does not scan for new devices, pair or forget devices, or change BlueZ settings,
 and the recovery log lines do not contain the address. Delete the file to forget
 the headset.
 
-A BlueZ connect request has a 10 second timeout, so Ctrl+C can take up to about
-15 seconds to take effect while one is in progress.
+Ctrl+C takes effect in about 10 seconds while a BlueZ Connect is in progress
+(its timeout is 10 seconds). If `bluetoothd` stops responding, it can take up to
+about 20 seconds, because other bus calls are capped at 5 seconds.
 
 ## Troubleshooting
 
 ### Access denied (exit 77)
 
-`probe` or `bridge` found the tracker but could not open it. Install the udev rule
-as described under [Permissions](#permissions), then reconnect the headset.
+`probe` or `dump` found the tracker but could not open it, or `bridge` did so on
+its first run (exit 77). Once a headset address is stored, `bridge` does not exit:
+it keeps retrying in the reconnect backoff and prints the udev hint each time.
+Install the udev rule as described under [Permissions](#permissions), then
+reconnect the headset.
 
 ### No verified tracker is found (exit 2 or 3)
+
+`probe` and `dump` exit 2. `bridge` exits 3 only on its first run. With a stored
+address it keeps retrying, so run `probe` to see the current state.
 
 1. Confirm the headset is connected: `bluetoothctl info XX:XX:XX:XX:XX:XX`.
 2. Run `sony-head-tracker-linux probe`.

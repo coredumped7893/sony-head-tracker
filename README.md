@@ -148,8 +148,8 @@ and troubleshooting steps in
 ### Linux (command line)
 
 The Linux port is a command-line bridge that reads the headset through hidraw. It
-needs CMake 3.25 or later, a C++20 compiler, `libsystemd-dev`, `pkg-config`, and
-glibc 2.36 or later.
+needs CMake 3.25 or later, a C++20 compiler, `libsystemd-dev` (libsystemd 246 or later),
+`pkg-config`, and glibc 2.36 or later.
 
 ```bash
 cmake -S . -B build/linux -DCMAKE_BUILD_TYPE=Release
@@ -380,8 +380,8 @@ variants, device recovery, and ULT WEAR's silent A2DP keepalive are documented i
 
 ### Linux
 
-The Linux CLI needs CMake 3.25 or later, a C++20 compiler, `libsystemd-dev`,
-`pkg-config`, and glibc 2.36 or later. Use the commands in
+The Linux CLI needs CMake 3.25 or later, a C++20 compiler, `libsystemd-dev`
+(libsystemd 246 or later), `pkg-config`, and glibc 2.36 or later. Use the commands in
 [`docs/LINUX.md`](docs/LINUX.md#build), which also covers the udev rule and
 Classic-only pairing.
 
