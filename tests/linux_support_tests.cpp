@@ -47,8 +47,6 @@ TEST(recovery_sequence_is_connect_then_force_reconnect_then_none) {
         steps.push_back(bluetoothRecoveryStep(false, true, stage));
         stage = nextBluetoothRecoveryStage(stage, true);
     }
-    CHECK(steps.size() == 4);
-    if (steps.size() != 4) return;
     CHECK(steps[0] == BluetoothRecoveryStep::connect);
     CHECK(steps[1] == BluetoothRecoveryStep::forceReconnect);
     CHECK(steps[2] == BluetoothRecoveryStep::none);
@@ -68,7 +66,6 @@ TEST(stall_reopens_once_then_backs_off) {
 }
 
 TEST(stall_loop_without_samples_reopens_exactly_once) {
-    using namespace std::chrono_literals;
     bool reopenAttempted = false;
     int reopens = 0;
     for (int tick = 0; tick < 100; ++tick) {
@@ -96,6 +93,17 @@ TEST(address_rejects_wrong_digit_count) {
     CHECK(normalizeBluetoothAddress(L"a1:b2:c3:d4:e5:f") == "");
     CHECK(normalizeBluetoothAddress(L"a1:b2:c3:d4:e5:f6:0") == "");
     CHECK(normalizeBluetoothAddress(L"") == "");
+}
+
+TEST(address_ignores_separator_style) {
+    CHECK(normalizeBluetoothAddress(L"a1-b2-c3-d4-e5-f6") == "A1B2C3D4E5F6");
+    CHECK(normalizeBluetoothAddress(L"a1b2c3d4e5f6") == "A1B2C3D4E5F6");
+    CHECK(normalizeBluetoothAddress(L"a1:b2-c3:d4-e5:f6") == "A1B2C3D4E5F6");
+}
+
+TEST(address_skips_non_hex_characters_before_counting_digits) {
+    CHECK(normalizeBluetoothAddress(L"g1:b2:c3:d4:e5:f6") == "");
+    CHECK(normalizeBluetoothAddress(L"a1:b2:c3:d4:e5:f6g") == "A1B2C3D4E5F6");
 }
 
 TEST(xdg_absolute_config_home_wins) {
