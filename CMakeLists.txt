@@ -107,7 +107,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         src/linux/output_udp_linux.cpp
         src/linux/private_file_linux.cpp
     )
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(SYSTEMD REQUIRED IMPORTED_TARGET libsystemd)
     target_link_libraries(sony_head_tracker_linux_platform PUBLIC sony_head_tracker_core)
+    target_link_libraries(sony_head_tracker_linux_platform PRIVATE PkgConfig::SYSTEMD)
     sht_apply_macos_hardening(sony_head_tracker_linux_platform)
 
     add_executable(sony-head-tracker-linux src/linux/main_linux.cpp)

@@ -255,19 +255,49 @@ int runBridge(int argc, char** argv) {
                    << std::flush;
     };
 
+    std::wstring trackedAddress = sony::loadLastVerifiedBluetoothAddress();
+    unsigned recoveryStage{};
+
+    const auto anyAccessDenied = [](const auto& devices) {
+        return std::any_of(devices.begin(), devices.end(),
+                           [](const auto& device) { return device.accessDenied; });
+    };
+
     const auto connect = [&]() {
-        const auto devices = hid.enumerate();
-        const auto selected = verifiedDevice(devices);
+        auto devices = hid.enumerate();
+        auto selected = verifiedDevice(devices);
+        const auto step = sony::bluetoothRecoveryStep(
+            selected != devices.end() || anyAccessDenied(devices), !trackedAddress.empty(),
+            recoveryStage);
+        if (step != sony::BluetoothRecoveryStep::none) {
+            const bool forced = step == sony::BluetoothRecoveryStep::forceReconnect;
+            std::wcerr << (forced
+                ? L"Android Head Tracker collection is still absent; forcing one paired-device reconnect.\n"
+                : L"Android Head Tracker collection is absent; requesting paired-device connection.\n");
+            const auto recovery = sony::recoverPairedBluetoothHid(trackedAddress, {}, forced);
+            std::wcerr << std::format(
+                L"Bluetooth recovery paired={} wasConnected={} connected={} forced={} "
+                L"close={} open={}\n",
+                recovery.pairedDeviceFound, recovery.wasConnected, recovery.connected,
+                recovery.forcedBasebandReconnect, recovery.closeStatus, recovery.openStatus);
+            recoveryStage = sony::nextBluetoothRecoveryStage(recoveryStage, recovery.connected);
+            if (recovery.connected) {
+                devices = hid.enumerate();
+                selected = verifiedDevice(devices);
+            }
+        }
         if (selected == devices.end()) {
-            accessDenied = std::any_of(devices.begin(), devices.end(),
-                                       [](const auto& device) { return device.accessDenied; });
+            accessDenied = anyAccessDenied(devices);
             if (accessDenied) reportNoTracker(devices, std::wcerr);
             return false;
         }
         accessDenied = false;
-        if (!selected->bluetoothAddress.empty() &&
-            !sony::saveLastVerifiedBluetoothAddress(selected->bluetoothAddress)) {
-            std::wcerr << L"Warning: could not persist the verified tracker identity.\n";
+        recoveryStage = 0;
+        if (!selected->bluetoothAddress.empty()) {
+            trackedAddress = selected->bluetoothAddress;
+            if (!sony::saveLastVerifiedBluetoothAddress(trackedAddress)) {
+                std::wcerr << L"Warning: could not persist the verified tracker identity.\n";
+            }
         }
         udp.setDeviceLabel(selected->product);
         if (!selected->product.empty()) std::wcout << L"Tracking headset: " << selected->product << L'\n';
@@ -276,7 +306,7 @@ int runBridge(int argc, char** argv) {
     };
 
     const bool initiallyConnected = connect();
-    if (!initiallyConnected && sony::loadLastVerifiedBluetoothAddress().empty()) {
+    if (!initiallyConnected && trackedAddress.empty()) {
         if (accessDenied) return kExitNoPermission;
         std::wcerr << L"No verified Android Head Tracker was found.\n";
         return kExitConnectFailed;
