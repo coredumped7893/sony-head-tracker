@@ -222,6 +222,12 @@ While flying:
 - If an axis turns the wrong way, restart the relay with that axis name, for
   example `python3 linux/xplane-relay.py yaw` or
   `python3 linux/xplane-relay.py yaw roll`.
+- If the view moves too far, lower the relay gain, for example
+  `python3 linux/xplane-relay.py --gain 0.7`. The default `1.0` turns the view as
+  far as your head.
+- If the view is jittery, start the bridge with a lower smoothing value, for
+  example `bridge --smoothing 0.08`. Lower is smoother but lags more. The default
+  is `0.18`. Fast head turns are smoothed less, so they stay responsive.
 
 Limits:
 
