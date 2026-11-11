@@ -126,24 +126,27 @@ bool configureFeatures(HidBackend::Context& context, const std::vector<FeatureAs
             Logger::instance().write(LogLevel::error, std::format(L"Could not read feature report {}", reportId));
             return false;
         }
+        auto off = before;
         auto after = before;
         for (const auto& item : plan) {
             if (item.reportId != reportId) continue;
             if (!readFeatureBits(before, *layout, item.bitOffset, item.bitSize) ||
+                !writeFeatureBits(off, *layout, item.bitOffset, item.bitSize, 0) ||
                 !writeFeatureBits(after, *layout, item.bitOffset, item.bitSize, item.value)) {
                 Logger::instance().write(LogLevel::error, std::format(L"Feature field is outside report {}", reportId));
                 return false;
             }
         }
-        if (after != before) {
-            if (ioctl(context.fd, HIDIOCSFEATURE(after.size()), after.data()) < 0) {
+        // The ULT WEAR can report the enabled value while not streaming; only an off-to-on write restarts it.
+        for (auto* report : {&off, &after}) {
+            if (ioctl(context.fd, HIDIOCSFEATURE(report->size()), report->data()) < 0) {
                 Logger::instance().write(LogLevel::error, std::format(
                     L"Feature report {} write failed (errno={})", reportId, errno));
                 return false;
             }
-            Logger::instance().write(LogLevel::info, std::format(
-                L"Feature report {} before={} requested={}", reportId, hexDump(before), hexDump(after)));
         }
+        Logger::instance().write(LogLevel::info, std::format(
+            L"Feature report {} before={} requested={}", reportId, hexDump(before), hexDump(after)));
         std::vector<std::uint8_t> verified;
         if (!readFeatureReport(context.fd, reportId, context.featureReportBytes, verified) ||
             (layout->hasReportIdPrefix && verified.front() != reportId)) {
