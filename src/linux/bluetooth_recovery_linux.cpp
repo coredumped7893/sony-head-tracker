@@ -42,7 +42,9 @@ std::wstring loadLastVerifiedBluetoothAddress() {
     const auto path = lastTrackerPath();
     if (path.empty()) return {};
     const auto content = linux_platform::readPrivateFile(path);
-    const auto normalized = normalizeBluetoothAddress(std::wstring(content.begin(), content.end()));
+    std::wstring widened;
+    for (const char byte : content) widened.push_back(static_cast<unsigned char>(byte));
+    const auto normalized = normalizeBluetoothAddress(widened);
     return std::wstring(normalized.begin(), normalized.end());
 }
 

@@ -53,6 +53,21 @@ struct ScopedXdgConfigHome {
     }
 };
 
+struct ScopedEnvironment {
+    std::string name;
+    std::optional<std::string> previous;
+
+    ScopedEnvironment(const char* variable, const char* value) : name(variable) {
+        if (const char* old = std::getenv(variable)) previous = old;
+        ::setenv(variable, value, 1);
+    }
+
+    ~ScopedEnvironment() {
+        if (previous) ::setenv(name.c_str(), previous->c_str(), 1);
+        else ::unsetenv(name.c_str());
+    }
+};
+
 bool hasTemporaryResidue(const std::filesystem::path& directory) {
     for (const auto& entry : std::filesystem::directory_iterator(directory)) {
         if (entry.path().filename().string().find(".tmp.") != std::string::npos) return true;
@@ -154,6 +169,23 @@ TEST(linux_private_file_rejects_final_symlinks_and_invalid_parents) {
     CHECK(!sony::linux_platform::writePrivateFileAtomically(parentFile / "state", "new"));
 }
 
+TEST(linux_private_file_read_rejects_files_over_the_size_cap) {
+    TemporaryDirectory temporary;
+    const std::size_t cap = 1024 * 1024;
+    const auto atCap = temporary.path / "at-cap";
+    const auto overCap = temporary.path / "over-cap";
+    {
+        std::ofstream output(atCap, std::ios::binary);
+        output << std::string(cap, 'x');
+    }
+    {
+        std::ofstream output(overCap, std::ios::binary);
+        output << std::string(cap + 1, 'x');
+    }
+    CHECK(sony::linux_platform::readPrivateFile(atCap).size() == cap);
+    CHECK(sony::linux_platform::readPrivateFile(overCap).empty());
+}
+
 TEST(linux_last_tracker_address_persists_privately_under_xdg_config_home) {
     TemporaryDirectory temporary;
     const ScopedXdgConfigHome xdg(temporary.path);
@@ -168,6 +200,28 @@ TEST(linux_last_tracker_address_persists_privately_under_xdg_config_home) {
     CHECK(readText(file) == "A1B2C3D4E5F6\n");
     CHECK(modeOf(file) == 0600);
     CHECK(modeOf(directory) == 0700);
+    CHECK(sony::loadLastVerifiedBluetoothAddress() == L"A1B2C3D4E5F6");
+}
+
+TEST(linux_last_tracker_garbage_file_loads_as_empty) {
+    TemporaryDirectory temporary;
+    const ScopedXdgConfigHome xdg(temporary.path);
+    const auto directory = temporary.path / "sony-head-tracker";
+    std::filesystem::create_directories(directory);
+    {
+        std::ofstream output(directory / "last-tracker", std::ios::binary);
+        output << "not an address\n\xFF\xFE";
+    }
+    CHECK(sony::loadLastVerifiedBluetoothAddress().empty());
+}
+
+TEST(linux_last_tracker_falls_back_to_home_when_xdg_config_home_is_relative) {
+    TemporaryDirectory temporary;
+    const ScopedEnvironment xdg("XDG_CONFIG_HOME", "relative/dir");
+    const ScopedEnvironment home("HOME", temporary.path.c_str());
+
+    CHECK(sony::saveLastVerifiedBluetoothAddress(L"a1:b2:c3:d4:e5:f6"));
+    CHECK(readText(temporary.path / ".config" / "sony-head-tracker" / "last-tracker") == "A1B2C3D4E5F6\n");
     CHECK(sony::loadLastVerifiedBluetoothAddress() == L"A1B2C3D4E5F6");
 }
 
