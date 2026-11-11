@@ -180,6 +180,55 @@ Ctrl+C takes effect in about 10 seconds while a BlueZ Connect is in progress
 (its timeout is 10 seconds). If `bluetoothd` stops responding, it can take up to
 about 20 seconds, because other bus calls are capped at 5 seconds.
 
+## X-Plane 12
+
+X-Plane 12 has no OpenTrack input of its own. The relay
+[`linux/xplane-relay.py`](../linux/xplane-relay.py) reads the bridge's OpenTrack
+packets on UDP `4242` and writes the pilot head yaw, pitch and roll datarefs
+through X-Plane's UDP interface on port `49000`. It needs only Python 3 and does
+not need OpenTrack.
+
+One-time X-Plane setup: in **Settings → Network**, allow incoming UDP connections
+on port `49000`.
+
+Start each command in its own terminal, in this order:
+
+1. Keep the headset's audio link active, because the headset streams only while
+   audio plays. Skip this step if X-Plane's sound already plays through the
+   headset.
+
+   ```bash
+   paplay --raw --device="$(pactl list short sinks | awk '/bluez_output/{print $2}')" /dev/zero
+   ```
+
+2. Start the relay:
+
+   ```bash
+   python3 linux/xplane-relay.py
+   ```
+
+3. Wait at least 3 seconds after step 1, then start the bridge:
+
+   ```bash
+   build/linux/sony-head-tracker-linux bridge
+   ```
+
+4. In X-Plane, switch to the 3D cockpit view.
+
+While flying:
+
+- To recenter, look straight ahead and run `kill -USR1 <pid>`, using the PID the
+  bridge prints at startup.
+- If an axis turns the wrong way, restart the relay with that axis name, for
+  example `python3 linux/xplane-relay.py yaw` or
+  `python3 linux/xplane-relay.py yaw roll`.
+
+Limits:
+
+- The relay binds UDP `4242`, so OpenTrack cannot run at the same time. The
+  bridge must use the default port (no `--port`).
+- Only rotation is sent. The headset reports no position, so there is no leaning.
+
 ## Troubleshooting
 
 ### Access denied (exit 77)

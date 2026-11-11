@@ -162,6 +162,7 @@ sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=hidraw
 
 The headset streams only while audio is playing; silence is enough. Pairing
 pitfalls, recovery, and troubleshooting are in [`docs/LINUX.md`](docs/LINUX.md).
+For X-Plane 12, see [`docs/LINUX.md`](docs/LINUX.md#x-plane-12).
 Only the ULT WEAR has been tested on Linux.
 
 > **Hardware status:** changing orientation reports have been received from a
