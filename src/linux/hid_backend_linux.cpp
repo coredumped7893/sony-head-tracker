@@ -14,6 +14,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -74,12 +75,18 @@ std::vector<std::uint8_t> sensorDescriptionReportIds(const ParsedReportDescripto
     return ids;
 }
 
-std::string readMarker(int fd, const ParsedReportDescriptor& descriptor) {
+void warnErrno(const std::string& name, std::wstring_view what, int error) {
+    Logger::instance().write(LogLevel::warning, std::format(
+        L"{} {}: {}", what, detail::widen(name), detail::widen(std::strerror(error))));
+}
+
+std::string readMarker(int fd, const std::string& name, const ParsedReportDescriptor& descriptor) {
     std::vector<std::uint8_t> report(std::max<std::size_t>(descriptor.featureReportBytes, 2));
     for (const auto reportId : sensorDescriptionReportIds(descriptor)) {
         report.assign(report.size(), 0);
         report[0] = reportId;
         const int length = ioctl(fd, HIDIOCGFEATURE(report.size()), report.data());
+        if (length < 0) warnErrno(name, L"Could not read the sensor description feature report from", errno);
         if (length <= 0) continue;
         auto marker = markerFromFeatureReport(
             std::span<const std::uint8_t>(report.data(), static_cast<std::size_t>(length)));
@@ -211,10 +218,11 @@ std::vector<DeviceInfo> HidBackend::enumerate(bool) {
         bool accessDenied = false;
         const int fd = open(("/dev/" + name).c_str(), O_RDONLY | O_CLOEXEC);
         if (fd >= 0) {
-            marker = readMarker(fd, *descriptor);
+            marker = readMarker(fd, name, *descriptor);
             close(fd);
         } else {
             accessDenied = errno == EACCES || errno == EPERM;
+            if (!accessDenied) warnErrno(name, L"Could not open", errno);
         }
 
         Logger::instance().write(LogLevel::info, std::format(
@@ -248,8 +256,8 @@ bool HidBackend::connect(const DeviceInfo& device, RawCallback raw, SampleCallba
     uevent.productId = device.productId;
     uevent.name = device.bluetoothName;
     uevent.uniq = device.bluetoothAddress;
-    const auto verified = describeHidrawDevice(device.path, device.instanceId, *descriptor, uevent,
-                                               readMarker(context_->fd, *descriptor), false);
+    const auto marker = readMarker(context_->fd, fs::path(path).filename().string(), *descriptor);
+    const auto verified = describeHidrawDevice(device.path, device.instanceId, *descriptor, uevent, marker, false);
     const auto field = std::find_if(verified.fields.begin(), verified.fields.end(), [](const auto& candidate) {
         return candidate.feature && candidate.usagePage == kSensorPage && candidate.usage == kReportInterval;
     });
