@@ -2,6 +2,7 @@
 // Linux CLI. Probes hidraw nodes for the Android Head Tracker, dumps its raw
 // and decoded input reports, and streams filtered orientation over UDP.
 #include "sony_head_tracker/bluetooth_recovery.hpp"
+#include "sony_head_tracker/cancellation.hpp"
 #include "sony_head_tracker/device.hpp"
 #include "sony_head_tracker/hid_backend.hpp"
 #include "sony_head_tracker/linux_support.hpp"
@@ -32,11 +33,11 @@ constexpr int kExitNoPermission = 77; // EX_NOPERM, sysexits.h
 constexpr int kExitNotFound = 2;
 constexpr int kExitConnectFailed = 3;
 
-std::atomic_bool stopRequested{};
+sony::CancellationFlag stopFlag;
 std::atomic_bool recenterRequested{};
 
 void signalHandler(int signal) {
-    if (signal == SIGINT || signal == SIGTERM) stopRequested = true;
+    if (signal == SIGINT || signal == SIGTERM) stopFlag.requestStop();
     if (signal == SIGUSR1) recenterRequested = true;
 }
 
@@ -102,11 +103,11 @@ bool waitInterruptibly(std::chrono::seconds duration,
                        std::chrono::steady_clock::time_point deadline,
                        unsigned seconds) {
     const auto until = std::chrono::steady_clock::now() + duration;
-    while (!stopRequested && !deadlineReached(deadline, seconds) &&
+    while (!stopFlag.stopRequested() && !deadlineReached(deadline, seconds) &&
            std::chrono::steady_clock::now() < until) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-    return !stopRequested && !deadlineReached(deadline, seconds);
+    return !stopFlag.stopRequested() && !deadlineReached(deadline, seconds);
 }
 
 int reportNoTracker(const std::vector<sony::DeviceInfo>& devices, std::wostream& out) {
@@ -170,7 +171,7 @@ int runDump(int argc, char** argv) {
         return kExitConnectFailed;
     }
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
-    while (!stopRequested && !deadlineReached(deadline, seconds) && hid.connected()) {
+    while (!stopFlag.stopRequested() && !deadlineReached(deadline, seconds) && hid.connected()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     hid.disconnect();
@@ -274,7 +275,7 @@ int runBridge(int argc, char** argv) {
             std::wcerr << (forced
                 ? L"Android Head Tracker collection is still absent; forcing one paired-device reconnect.\n"
                 : L"Android Head Tracker collection is absent; requesting paired-device connection.\n");
-            const auto recovery = sony::recoverPairedBluetoothHid(trackedAddress, {}, forced);
+            const auto recovery = sony::recoverPairedBluetoothHid(trackedAddress, {}, forced, &stopFlag);
             std::wcerr << std::format(
                 L"Bluetooth recovery paired={} wasConnected={} connected={} forced={} "
                 L"close={} open={}\n",
@@ -349,7 +350,7 @@ int runBridge(int argc, char** argv) {
         std::wcerr << L"Tracker configured; waiting for the first valid sample.\n";
     };
 
-    while (!stopRequested && !deadlineReached(deadline, seconds)) {
+    while (!stopFlag.stopRequested() && !deadlineReached(deadline, seconds)) {
         if (recenterRequested.exchange(false)) {
             std::lock_guard lock(filterMutex);
             filter.recenter();

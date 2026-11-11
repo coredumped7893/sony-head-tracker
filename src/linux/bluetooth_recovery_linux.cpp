@@ -10,6 +10,7 @@
 #include "sony_head_tracker/macos_support.hpp"
 
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -59,6 +60,7 @@ using MessagePtr = std::unique_ptr<sd_bus_message, MessageUnref>;
 
 constexpr const char* kBluez = "org.bluez";
 constexpr const char* kDeviceInterface = "org.bluez.Device1";
+constexpr std::uint64_t kDisconnectTimeoutUsec = 5'000'000;
 constexpr std::uint64_t kConnectTimeoutUsec = 10'000'000;
 
 // Only the error name is logged: the message and object path can embed the address.
@@ -207,6 +209,8 @@ BluetoothRecoveryResult recoverPairedBluetoothHid(
         std::wcerr << std::format(L"BlueZ system bus could not be opened: code={}\n", openCode);
         return result;
     }
+    // Calls passing timeout 0 would otherwise wait the ~25 s sd-bus default, uncancellable.
+    sd_bus_set_method_call_timeout(bus.get(), kDisconnectTimeoutUsec);
 
     std::string objectPath;
     bool connectedNow{};
@@ -220,14 +224,19 @@ BluetoothRecoveryResult recoverPairedBluetoothHid(
     if (forceBasebandReconnect && result.wasConnected) {
         result.forcedBasebandReconnect = true;
         result.closeStatus = callDeviceMethod(bus.get(), objectPath, "Disconnect",
-                                              L"Disconnect", 0);
+                                              L"Disconnect", kDisconnectTimeoutUsec);
+        if (result.closeStatus < 0) return result;
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-        while (isConnected() && std::chrono::steady_clock::now() < deadline) {
-            if (cancelled()) {
-                result.cancelled = true;
-                return result;
-            }
+        while (!cancelled() && isConnected() && std::chrono::steady_clock::now() < deadline) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        if (cancelled()) {
+            result.cancelled = true;
+            return result;
+        }
+        if (isConnected()) {
+            std::wcerr << L"BlueZ headset is still connected after Disconnect; skipping reconnect\n";
+            return result;
         }
     }
 
@@ -245,7 +254,9 @@ BluetoothRecoveryResult recoverPairedBluetoothHid(
     result.connected = bluetoothConnectionConfirmed(waitResult, isConnected());
 
     // The kernel creates the hidraw node shortly after BlueZ reports connected.
-    if (result.connected) std::this_thread::sleep_for(std::chrono::seconds(1));
+    for (int slice = 0; result.connected && slice < 10 && !cancelled(); ++slice) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
     return result;
 }
 
