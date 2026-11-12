@@ -13,6 +13,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Linux X-Plane 12 relay (`linux/xplane-relay.py`) that turns the bridge's
   OpenTrack output into X-Plane head-view datarefs, see
   [docs/LINUX.md](docs/LINUX.md#x-plane-12).
+- DCS World setup for Linux (OpenTrack inside the Proton prefix) and a HOTAS hat
+  relay (`linux/hat-relay.py`) that pans the view while head tracking is on, see
+  [docs/LINUX.md](docs/LINUX.md#dcs-world).
 
 ### Fixed
 - Head tracking no longer loses its center after the head moves around. The gyro
