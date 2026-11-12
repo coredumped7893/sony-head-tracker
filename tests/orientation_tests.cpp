@@ -1,6 +1,6 @@
 // orientation_tests.cpp
 // OrientationFilter behaviour: recenter, smoothing attenuation, axis mapping, and
-// graceful handling of samples with no angular velocity.
+// graceful handling of samples with no angular velocity, and device frame resets.
 #include "test_framework.hpp"
 
 #include "sony_head_tracker/orientation.hpp"
@@ -66,4 +66,26 @@ TEST(missing_angular_velocity_stays_missing_and_is_stable) {
     CHECK(std::isfinite(out2.euler.yaw));
     CHECK(std::isfinite(out2.euler.pitch));
     CHECK(std::isfinite(out2.euler.roll));
+}
+
+TEST(device_reference_reset_keeps_axes_and_pose) {
+    OrientationFilter f(identityConfig(1.0));
+    MotionSample start = rot({0, 0, 1.2});   // head forward, device frame yawed 1.2 rad
+    start.resetCounter = 5;
+    f.process(std::move(start));             // becomes the center
+
+    MotionSample reset = rot({0, 0, 0});     // same head pose after the device re-zeroed
+    reset.resetCounter = 6;
+    const auto held = f.process(std::move(reset));
+    CHECK_NEAR(held.euler.yaw, 0.0, 1e-6);
+    CHECK_NEAR(held.euler.pitch, 0.0, 1e-6);
+    CHECK_NEAR(held.euler.roll, 0.0, 1e-6);
+
+    MotionSample nod = rot({0.3, 0, 0});     // rotation about X only
+    nod.resetCounter = 6;
+    const auto out = f.process(std::move(nod));
+    constexpr double deg = 180.0 / std::numbers::pi;
+    CHECK_NEAR(out.euler.roll, 0.3 * deg, 1e-6);
+    CHECK_NEAR(out.euler.yaw, 0.0, 1e-6);
+    CHECK_NEAR(out.euler.pitch, 0.0, 1e-6);
 }
