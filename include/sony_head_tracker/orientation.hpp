@@ -26,6 +26,7 @@ private:
     Quaternion latestRaw_{};
     bool initialized_{};
     bool recenterPending_{};
+    std::uint8_t resetCounter_{};
     std::chrono::steady_clock::time_point last_{};
 };
 

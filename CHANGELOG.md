@@ -6,6 +6,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Linux command-line bridge (`sony-head-tracker-linux`): hidraw backend with a pure
+  HID report-descriptor parser, udev rule, BlueZ reconnect recovery, see
+  [docs/LINUX.md](docs/LINUX.md).
+- Linux X-Plane 12 relay (`linux/xplane-relay.py`) that turns the bridge's
+  OpenTrack output into X-Plane head-view datarefs, see
+  [docs/LINUX.md](docs/LINUX.md#x-plane-12).
+
 ## [2.2.0] - 2026-07-11
 
 macOS release. Sony Head Tracker now runs natively on macOS 14 or later, with

@@ -1,7 +1,7 @@
 # Sony Head Tracker
 
 Use the motion sensors already inside compatible Sony headphones and earbuds as
-a real-time head tracker on Windows or macOS.
+a real-time head tracker on Windows, macOS, or Linux.
 
 [![Build](https://github.com/NicholasSlattery/sony-head-tracker/actions/workflows/build.yml/badge.svg)](https://github.com/NicholasSlattery/sony-head-tracker/actions/workflows/build.yml)
 [![Latest release](https://img.shields.io/github/v/release/NicholasSlattery/sony-head-tracker)](https://github.com/NicholasSlattery/sony-head-tracker/releases/latest)
@@ -145,6 +145,26 @@ See the complete setup, device-support status, ULT WEAR audio activation note,
 and troubleshooting steps in
 [`docs/MACOS.md`](docs/MACOS.md).
 
+### Linux (command line)
+
+The Linux port is a command-line bridge that reads the headset through hidraw. It
+needs CMake 3.25 or later, a C++20 compiler, `libsystemd-dev` (libsystemd 246 or later),
+`pkg-config`, and glibc 2.36 or later.
+
+```bash
+cmake -S . -B build/linux -DCMAKE_BUILD_TYPE=Release
+cmake --build build/linux --parallel
+sudo cp linux/70-sony-head-tracker.rules /etc/udev/rules.d/
+sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=hidraw
+./build/linux/sony-head-tracker-linux probe     # reconnect the headset first
+./build/linux/sony-head-tracker-linux bridge
+```
+
+The headset streams only while audio is playing; silence is enough. Pairing
+pitfalls, recovery, and troubleshooting are in [`docs/LINUX.md`](docs/LINUX.md).
+For X-Plane 12, see [`docs/LINUX.md`](docs/LINUX.md#x-plane-12).
+Only the ULT WEAR has been tested on Linux.
+
 > **Hardware status:** changing orientation reports have been received from a
 > physical WH-1000XM5 on Windows and a physical ULT WEAR on macOS. Behaviour
 > varies with Sony firmware and the platform Bluetooth stack. This project never
@@ -154,6 +174,7 @@ and troubleshooting steps in
 
 - [Quick start](#quick-start)
 - [macOS guide](docs/MACOS.md)
+- [Linux guide](docs/LINUX.md)
 - [Compatibility](#compatibility)
 - [Where the data goes (ports)](#where-the-data-goes-ports)
 - [Gyroscope and accelerometer](#gyroscope-and-accelerometer)
@@ -358,6 +379,13 @@ The app targets macOS 14 or later. Detailed permissions, CLI usage, build
 variants, device recovery, and ULT WEAR's silent A2DP keepalive are documented in
 [`docs/MACOS.md`](docs/MACOS.md).
 
+### Linux
+
+The Linux CLI needs CMake 3.25 or later, a C++20 compiler, `libsystemd-dev`
+(libsystemd 246 or later), `pkg-config`, and glibc 2.36 or later. Use the commands in
+[`docs/LINUX.md`](docs/LINUX.md#build), which also covers the udev rule and
+Classic-only pairing.
+
 ### Windows
 
 Requires a C++20-capable MSVC and a current Windows 11 SDK (install **Desktop
@@ -395,7 +423,8 @@ See [`.github/workflows/build.yml`](.github/workflows/build.yml).
 ## Pair the headphones
 
 The following pairing, command, GUI, and repair sections describe Windows. For
-macOS, use [`docs/MACOS.md`](docs/MACOS.md).
+macOS, use [`docs/MACOS.md`](docs/MACOS.md); for Linux, use
+[`docs/LINUX.md`](docs/LINUX.md).
 
 1. Update the headset with Sony's app and enable its spatial-audio or
    head-tracking feature if available, then put the headset in pairing mode.

@@ -22,7 +22,14 @@ MotionSample OrientationFilter::process(MotionSample sample) {
     // so an orientation-only device simply forgoes drift correction.
     const Vec3 angular = sample.angularVelocity.value_or(Vec3{});
     latestRaw_ = rotationVectorToQuaternion(sample.rotationVector);
-    if (!initialized_) { filtered_ = latestRaw_; center_ = latestRaw_; last_ = sample.receivedAt; initialized_ = true; }
+    if (!initialized_) { filtered_ = latestRaw_; center_ = latestRaw_; last_ = sample.receivedAt; resetCounter_ = sample.resetCounter; initialized_ = true; }
+    if (sample.resetCounter != resetCounter_) {
+        // The device re-zeroed its reference frame, so the old center no longer applies.
+        // Re-anchor it so the current relative pose carries over unchanged.
+        center_ = multiply(latestRaw_, conjugate(multiply(conjugate(center_), filtered_)));
+        filtered_ = latestRaw_;
+        resetCounter_ = sample.resetCounter;
+    }
     if (recenterPending_) { center_ = latestRaw_; drift_ = {}; gyroBias_={}; integratedDrift_={}; recenterPending_ = false; }
     const auto dt = std::clamp(std::chrono::duration<double>(sample.receivedAt - last_).count(), 0.0, 0.1);
     last_ = sample.receivedAt;

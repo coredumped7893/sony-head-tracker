@@ -24,6 +24,10 @@ struct DescriptorField {
     std::uint32_t unit{};
     std::uint16_t dataIndex{};
     bool feature{};
+    std::uint32_t bitOffset{}; // first bit after the report-ID byte; only the raw descriptor parser sets it
+    bool isArray{};
+    std::uint16_t arrayIndex{};
+    bool constant{};
 };
 
 struct DeviceInfo {
