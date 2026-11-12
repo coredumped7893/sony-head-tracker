@@ -3,8 +3,10 @@
 // graceful handling of samples with no angular velocity, and device frame resets.
 #include "test_framework.hpp"
 
+#include "sony_head_tracker/math.hpp"
 #include "sony_head_tracker/orientation.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <numbers>
 
@@ -14,7 +16,6 @@ static FilterConfig identityConfig(double smoothing) {
     FilterConfig cfg;
     cfg.axes = AxisMapping{{0, 1, 2}, {1.0, 1.0, 1.0}};   // no remap/inversion
     cfg.smoothing = smoothing;
-    cfg.driftCorrectionPerSecond = 0.0;                    // isolate smoothing from drift
     return cfg;
 }
 
@@ -88,4 +89,50 @@ TEST(device_reference_reset_keeps_axes_and_pose) {
     CHECK_NEAR(out.euler.roll, 0.3 * deg, 1e-6);
     CHECK_NEAR(out.euler.yaw, 0.0, 1e-6);
     CHECK_NEAR(out.euler.pitch, 0.0, 1e-6);
+}
+
+TEST(slow_head_motion_does_not_drift_the_center) {
+    FilterConfig cfg;
+    cfg.axes = AxisMapping{{0, 1, 2}, {1.0, 1.0, 1.0}};
+    OrientationFilter f(cfg);
+    const auto start = std::chrono::steady_clock::time_point{};
+    double t = 0, yaw = 0;
+    MotionSample out;
+    const auto step = [&](double rate) {
+        yaw += rate / 60.0;
+        t += 1.0 / 60.0;
+        MotionSample s = rot({0, 0, yaw});
+        s.angularVelocity = Vec3{0, 0, rate};
+        s.receivedAt = start + std::chrono::microseconds(static_cast<long long>(t * 1e6));
+        out = f.process(s);
+    };
+    step(0.0);   // center at yaw 0
+    for (int cycle = 0; cycle < 5; ++cycle) {   // snap right fast, come back slowly
+        while (yaw < 0.7) step(2.0);
+        while (yaw > 0.0) step(-0.05);
+    }
+    yaw = 0.0;
+    for (int i = 0; i < 600; ++i) step(0.0);   // hold still facing forward for 10 s
+    CHECK_NEAR(out.euler.yaw, 0.0, 0.5);
+}
+
+TEST(nod_stays_pitch_when_head_is_turned_from_the_device_reference) {
+    // The headset's reference frame keeps whatever yaw it had at its last reset, so
+    // the centered pose can sit far from it. The default axis map is a mirror.
+    FilterConfig cfg;
+    cfg.smoothing = 1.0;
+    OrientationFilter f(cfg);
+    const auto turned = [](double extraYaw, double nod) {
+        const auto q = multiply(rotationVectorToQuaternion({0, 0, 1.0 + extraYaw}), rotationVectorToQuaternion({nod, 0, 0}));
+        return rot(quaternionToRotationVector(q));
+    };
+    f.process(turned(0, 0));                       // center while 57 deg off the reference
+    const auto nod = f.process(turned(0, 0.3));
+    CHECK_NEAR(nod.euler.pitch, 0.3 * 180.0 / std::numbers::pi, 1e-6);
+    CHECK_NEAR(nod.euler.roll, 0.0, 1e-6);
+    CHECK_NEAR(nod.euler.yaw, 0.0, 1e-6);
+    const auto lookAndNod = f.process(turned(0.5, 0.3));   // turn, then nod
+    CHECK_NEAR(lookAndNod.euler.yaw, -0.5 * 180.0 / std::numbers::pi, 1e-6);
+    CHECK_NEAR(lookAndNod.euler.pitch, 0.3 * 180.0 / std::numbers::pi, 1e-6);
+    CHECK_NEAR(lookAndNod.euler.roll, 0.0, 1e-6);
 }

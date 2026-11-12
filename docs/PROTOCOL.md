@@ -46,7 +46,9 @@ One UTF-8 JSON object per sample, no trailing newline. `version` is currently
 
 All vector fields share the configured axis convention (default **YXZ order
 with the X and Z axes inverted**); the gyroscope and accelerometer are remapped
-to match orientation.
+to match orientation. When the axis map is a mirror (an odd number of swaps and
+inversions, as the default is), `yprDegrees` is read from the unmirrored rotation
+and then negated, so a nod stays pitch however far the head is turned.
 
 ### Example
 

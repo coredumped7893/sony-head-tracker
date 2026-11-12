@@ -235,6 +235,75 @@ Limits:
   bridge must use the default port (no `--port`).
 - Only rotation is sent. The headset reports no position, so there is no leaning.
 
+## DCS World
+
+DCS (Steam, Proton) reads head tracking as TrackIR. Run the Windows build of
+[OpenTrack](https://github.com/opentrack/opentrack/releases) inside the DCS
+Proton prefix: it takes the bridge's UDP packets and hands them to DCS.
+
+One-time setup:
+
+1. Unpack the OpenTrack Windows portable build to a folder, for example
+   `~/Games/opentrack`.
+2. Copy Proton's ICU library next to `opentrack.exe` as `icuuc.dll`, which
+   OpenTrack's Qt needs:
+
+   ```bash
+   cp "$HOME/.local/share/Steam/steamapps/common/Proton - Experimental/files/lib/wine/x86_64-windows/icu.dll" ~/Games/opentrack/install/icuuc.dll
+   ```
+
+3. In Steam, open DCS → **Properties → Launch Options** and add OpenTrack, so
+   Proton starts it in the same Wine session as DCS:
+
+   ```text
+   PROTON_REMOTE_DEBUG_CMD=/home/<you>/Games/opentrack/install/opentrack.exe %command%
+   ```
+
+4. Start DCS once. In OpenTrack, set **Input** to `UDP over network` (port
+   `4242`) and **Output** to `freetrack 2.0 Enhanced`. In **Options →
+   Shortcuts**, bind **Center**.
+5. In DCS, check that TrackIR is enabled in **Options → Misc**.
+
+Each session:
+
+1. Start the bridge. Keep the headset's audio link active as in step 1 of
+   [X-Plane 12](#x-plane-12) if DCS sound does not play through the headset.
+
+   ```bash
+   build/linux/sony-head-tracker-linux bridge
+   ```
+
+2. Launch DCS from Steam. OpenTrack opens with it. Click **Start**.
+3. Look straight ahead and press the OpenTrack **Center** shortcut.
+
+### Hat panning
+
+While a head tracker is active, DCS ignores the HOTAS view hat. The relay
+[`linux/hat-relay.py`](../linux/hat-relay.py) adds the hat to the head angles
+instead. It reads the joystick through `/dev/input`.
+
+1. Learn the hat codes once. Press each direction when asked:
+
+   ```bash
+   python3 linux/hat-relay.py --device /dev/input/by-id/<joystick>-event-joystick --learn
+   ```
+
+2. Start the bridge on port `4240`, so it sends to the relay instead of
+   OpenTrack:
+
+   ```bash
+   build/linux/sony-head-tracker-linux bridge --port 4240
+   ```
+
+3. Start the relay with the printed codes. It forwards to OpenTrack on `4242`:
+
+   ```bash
+   python3 linux/hat-relay.py --device /dev/input/by-id/<joystick>-event-joystick --up N --down N --left N --right N --reset N
+   ```
+
+Holding the hat pans the view at 60°/s (`--rate` changes it). The view stays
+where you leave it until you press the reset button.
+
 ## Troubleshooting
 
 ### Access denied (exit 77)
