@@ -18,6 +18,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Head tracking no longer loses its center after the head moves around. The gyro
   drift correction counted slow head turns as sensor bias and kept adding them to
   the pose, so it was removed. The headset already fuses its own orientation.
+- Nodding no longer turns into roll or yaw after the bridge restarts. The axis map
+  was applied before centering, and the default map is a mirror, so nods mixed
+  into roll whenever the head faced away from the headset's reset direction.
 
 ## [2.2.0] - 2026-07-11
 

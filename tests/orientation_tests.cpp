@@ -3,6 +3,7 @@
 // graceful handling of samples with no angular velocity, and device frame resets.
 #include "test_framework.hpp"
 
+#include "sony_head_tracker/math.hpp"
 #include "sony_head_tracker/orientation.hpp"
 
 #include <chrono>
@@ -113,4 +114,25 @@ TEST(slow_head_motion_does_not_drift_the_center) {
     yaw = 0.0;
     for (int i = 0; i < 600; ++i) step(0.0);   // hold still facing forward for 10 s
     CHECK_NEAR(out.euler.yaw, 0.0, 0.5);
+}
+
+TEST(nod_stays_pitch_when_head_is_turned_from_the_device_reference) {
+    // The headset's reference frame keeps whatever yaw it had at its last reset, so
+    // the centered pose can sit far from it. The default axis map is a mirror.
+    FilterConfig cfg;
+    cfg.smoothing = 1.0;
+    OrientationFilter f(cfg);
+    const auto turned = [](double extraYaw, double nod) {
+        const auto q = multiply(rotationVectorToQuaternion({0, 0, 1.0 + extraYaw}), rotationVectorToQuaternion({nod, 0, 0}));
+        return rot(quaternionToRotationVector(q));
+    };
+    f.process(turned(0, 0));                       // center while 57 deg off the reference
+    const auto nod = f.process(turned(0, 0.3));
+    CHECK_NEAR(nod.euler.pitch, 0.3 * 180.0 / std::numbers::pi, 1e-6);
+    CHECK_NEAR(nod.euler.roll, 0.0, 1e-6);
+    CHECK_NEAR(nod.euler.yaw, 0.0, 1e-6);
+    const auto lookAndNod = f.process(turned(0.5, 0.3));   // turn, then nod
+    CHECK_NEAR(lookAndNod.euler.yaw, -0.5 * 180.0 / std::numbers::pi, 1e-6);
+    CHECK_NEAR(lookAndNod.euler.pitch, 0.3 * 180.0 / std::numbers::pi, 1e-6);
+    CHECK_NEAR(lookAndNod.euler.roll, 0.0, 1e-6);
 }
