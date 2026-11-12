@@ -14,6 +14,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   OpenTrack output into X-Plane head-view datarefs, see
   [docs/LINUX.md](docs/LINUX.md#x-plane-12).
 
+### Fixed
+- Head tracking no longer loses its center after the head moves around. The gyro
+  drift correction counted slow head turns as sensor bias and kept adding them to
+  the pose, so it was removed. The headset already fuses its own orientation.
+
 ## [2.2.0] - 2026-07-11
 
 macOS release. Sony Head Tracker now runs natively on macOS 14 or later, with
